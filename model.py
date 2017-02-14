@@ -4,6 +4,7 @@ import csv
 import tensorflow as tf
 import numpy as np
 from keras.layers import Input, Flatten, Dense, Lambda, Cropping2D, Convolution2D, MaxPooling2D, Dropout, Activation, SpatialDropout2D
+from keras.callbacks import ModelCheckpoint
 from keras.models import Model, Sequential
 from keras.models import load_model
 from sklearn.model_selection import train_test_split
@@ -44,6 +45,9 @@ def read_data(DATA_DIR, has_header=True):
                 raise Exception('Unexpected set of columns.')
 
         for values in reader:
+            if len(values) != len(columns):
+                raise Exception('Column number missmatch.')
+
             for i in range(3):
                 values[i] = os.path.join(DATA_DIR, 'IMG', values[i].split('/')[-1])
 
@@ -98,7 +102,17 @@ def generator(samples, batch_size=BATCH_SIZE):
 
                 # print "{} {} {}".format(name, center_image.shape, center_angle)
 
-                
+                choice = np.random.randint(100)
+
+                if choice < 50:
+                    image = image[:,::-1,:]
+                    angle = -angle
+
+                # 68% - dx=0, 16% dx = +1 or -1
+                dx = np.clip(int(np.random.normal()),-1,1)
+                dy = np.clip(int(np.random.normal()),-1,1)
+
+                image = np.roll(np.roll(image, dx, axis=1), dy, axis=0)
 
                 images.append(image)
                 angles.append(angle)
@@ -127,57 +141,58 @@ def build_model(input_shape):
     # 3 @ 318 x 90 -> Conv 7 x 7 (+1 x +1) -> MaxPool 3 x 3 -> Dropout -> Elu -> 24 @ 104 x 28
     model.add(Convolution2D(24, 7, 7, border_mode='valid'))
     model.add(MaxPooling2D((3, 3)))
-    model.add(Dropout(0.95))
+    model.add(Dropout(0.4))
     model.add(Activation('elu'))
 
     # Convolutional Layer 2:
     # 24 @ 104 x 28 -> Conv 5 x 5 (+1 x +1) -> MaxPool 2 x 2 -> Dropout -> Elu -> 36 @ 50 x 12
     model.add(Convolution2D(36, 5, 5, border_mode='valid'))
     model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.95))
+    model.add(Dropout(0.5))
     model.add(Activation('elu'))
 
     # Convolutional Layer 3:
     # 36 @ 50 x 12 -> Conv 5 x 5 (+1 x +1) -> MaxPool 2 x 2 -> Dropout -> Elu -> 48 @ 23 x 4
     model.add(Convolution2D(48, 5, 5, border_mode='valid'))
     model.add(MaxPooling2D((2, 2)))
-    model.add(Dropout(0.95))
+    model.add(Dropout(0.6))
     model.add(Activation('elu'))
 
     # Convolutional Layer 4:
     # 48 @ 23 x 4 -> Conv 3 x 3 -> Dropout -> Elu -> 64 @ 21 x 2
     model.add(Convolution2D(64, 3, 3, border_mode='valid'))
-    model.add(Dropout(0.95))
+    model.add(Dropout(0.6))
     model.add(Activation('elu'))
 
     # Convolutional Layer 5:
     # 64 @ 21 x 2 -> Conv 3 x 2 -> Dropout -> Elu -> 64 @ 19 x 1
     model.add(Convolution2D(64, 2, 3, border_mode='valid'))
-    model.add(Dropout(0.95))
+    model.add(Dropout(0.6))
     model.add(Activation('elu'))
 
     # FC Layer 1:
     # 64 @ 19 x 1 -> Flatten -> Dropout -> Elu -> ????
     model.add(Flatten())
-    model.add(Dropout(0.5))
+    model.add(Dropout(0.6))
     model.add(Activation('elu'))
     
     # FC Layer 2:
     # 1164 -> Dropout -> Elu -> 100
     model.add(Dense(100))
+    model.add(Dropout(0.5))
     model.add(Activation('elu'))
     
     # FC Layer 3:
     # 100 -> Dropout -> Elu -> 50
     model.add(Dense(50))
+    model.add(Dropout(0.5))
     model.add(Activation('elu'))
     
     # FC Layer 4:
     # 50 -> Dropout -> 10
     model.add(Dense(10))
+    model.add(Dropout(0.4))
     model.add(Activation('elu'))
-
-    model.add(Dropout(0.5))
 
     # Output Layer:
     # 10 -> Dense -> 1
@@ -194,11 +209,14 @@ def train():
 
     model.compile(loss='mse', optimizer='adam')
 
+    checkpointer = ModelCheckpoint(filepath="model.checkpoint.h5", verbose=1, save_best_only=True)
+
     model.fit_generator(generator = generator(train_samples, batch_size = BATCH_SIZE), 
-                        samples_per_epoch = len(train_samples) * 4, 
+                        samples_per_epoch = len(train_samples) * 10, 
                         validation_data = generator(validation_samples, batch_size = BATCH_SIZE), 
-                        nb_val_samples = len(validation_samples) * 4, 
-                        nb_epoch = 50)
+                        nb_val_samples = len(validation_samples) * 10, 
+                        nb_epoch = 40,
+                        callbacks = [checkpointer])
 
     model.save('model.h5')
 
