@@ -25,15 +25,13 @@ samples = []
 train_samples, validation_samples = [], []
 
 # 
-# Control (especially generated from the keyboard) tend to generate shape steering commands.
-# The goal of this function is to soften the turns slightly while also assign some steering 
-# command to frames that otherwise has zero steering.
+# The goal of this function is to assign some reasonable steering to frames that otherwise 
+# has zero steering.
 #
-# So, for zero the steering frame that is right before a non-zero steering, a half of the 
-# steering of the non-zero frame is assigned while for the non-zero steering frame only 790%
-# of the steering is kept.
+# So, for zero the steering frame that is right before a non-zero steering, a 80% of the 
+# non-zero steering is assigned.
 #
-def soften_turns(data):
+def assign_non_zero(data):
 
     prev_steering = 0.
 
@@ -50,7 +48,10 @@ def soften_turns(data):
     return data
         
 
-# As zero steering samples are severely over-represented, drop a half of them.
+#
+# As zero steering samples are severely over-represented, triplicate the non-zero once.
+#
+# Note that the generator will randomize the images to get different pictures.
 #
 def triple_non_zero(data):
     non_zero = filter((lambda item: abs(item['steering']) > 0.), data)
@@ -58,9 +59,10 @@ def triple_non_zero(data):
     return data + non_zero + non_zero
 
 
+#
 # Sample generator can generate 3 x 2 x 3x3 = 54 different samples.
-# Smaple multiplier is used to generate 5 time the size of the original set (hoping
-# that the samples will be different due to randomization).
+# It is used not to keep the pictures in memory (paying for this by 
+# loading them every time).
 #
 def generator(samples, batch_size=BATCH_SIZE):
     num_samples = len(samples)
@@ -77,11 +79,11 @@ def generator(samples, batch_size=BATCH_SIZE):
             for sample in batch_samples:
 
                 #
-                # With 40% chance take central camera and with 30% take left 
+                # With 60% chance take central camera and with 20% take left 
                 # or right cameras.
                 #
                 # For central camera take steering as is. For left and right 
-                # cameras add 0.2 and -0.2 to the steering respectively.
+                # cameras add 0.20 and -0.20 to the steering respectively.
                 choice = np.random.randint(100)
 
                 if choice < 60:
@@ -98,8 +100,6 @@ def generator(samples, batch_size=BATCH_SIZE):
 
                 image = plt.imread(image_name)
 
-                # print "{} {} {}".format(name, center_image.shape, center_angle)
-
                 choice = np.random.randint(100)
 
                 #
@@ -109,8 +109,7 @@ def generator(samples, batch_size=BATCH_SIZE):
                     angle = -angle
 
                 # 
-                # Slightly move the image (+/-1 pixel vertically and horizontally).
-                # 68% - dx/dy=0, 16% dx/dy = +/-1
+                # Slightly move the image (+/-1px vertically and horizontally).
                 dx = np.clip(int(np.random.normal()),-1,1)
                 dy = np.clip(int(np.random.normal()),-1,1)
 
@@ -238,19 +237,19 @@ def prepare_samples():
     orig_samples = read_data("./data")
 
     extra_samples = []
-    #extra_samples = read_data("./extra_data", has_header=False)
+#    extra_samples = read_data("./extra_data", has_header=False)
 
     samples = orig_samples + extra_samples
 
-    print "Original: total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
+    print "Original:       \t total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
 
-    samples = soften_turns(samples)
+    samples = assign_non_zero(samples)
 
-    print "Soften:   total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
+    print "Assign non-zero:\t total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
 
     samples = triple_non_zero(samples)
 
-    print "Drop low: total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
+    print "Drop low:       \t total:{}, non-zero:{}".format(len(samples), len(filter(lambda i: i['steering'] != 0.00, samples)))
 
     train_samples, validation_samples = train_test_split(samples, test_size=0.2)
 
@@ -274,7 +273,8 @@ def train():
                         samples_per_epoch = len(train_samples), 
                         validation_data = generator(validation_samples, batch_size = BATCH_SIZE), 
                         nb_val_samples = len(validation_samples), 
-                        nb_epoch = 50,
+                        nb_epoch = 35,
+                        verbose = 2,
                         callbacks = [checkpointer])
 
     model.save('model.h5')
